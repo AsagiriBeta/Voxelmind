@@ -1,0 +1,186 @@
+plugins {
+    id 'dev.architectury.loom' version '1.11-SNAPSHOT' apply false
+    id 'architectury-plugin' version '3.4-SNAPSHOT'
+    id 'com.github.johnrengelman.shadow' version '8.1.1' apply false
+}
+
+architectury {
+    minecraft = project.minecraft_version
+}
+
+allprojects {
+    group = rootProject.maven_group
+    version = rootProject.mod_version
+}
+
+subprojects {
+    apply plugin: 'dev.architectury.loom'
+    apply plugin: 'architectury-plugin'
+    apply plugin: 'maven-publish'
+
+    base {
+        // Set up a suffixed format for the mod jar names, e.g. `example-fabric`.
+        archivesName = "$rootProject.archives_name-$project.name"
+    }
+
+    repositories {
+        // Add repositories to retrieve artifacts from in here.
+        // You should only use this when depending on other mods because
+        // Loom adds the essential maven repositories to download Minecraft and libraries from automatically.
+        // See https://docs.gradle.org/current/userguide/declaring_repositories.html
+        // for more information about repositories.
+    }
+
+    dependencies {
+        minecraft "net.minecraft:minecraft:$rootProject.minecraft_version"
+        mappings loom.officialMojangMappings()
+    }
+
+    java {
+        // Loom will automatically attach sourcesJar to a RemapSourcesJar task and to the "build" task
+        // if it is present.
+        // If you remove this line, sources will not be generated.
+        withSourcesJar()
+
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        it.options.release = 21
+    }
+
+    // Configure Maven publishing.
+    publishing {
+        publications {
+            mavenJava(MavenPublication) {
+                artifactId = base.archivesName.get()
+                from components.java
+            }
+        }
+
+        // See https://docs.gradle.org/current/userguide/publishing_maven.html for information on how to set up publishing.
+        repositories {
+            // Add repositories to publish to here.
+            // Notice: This block does NOT have the same function as the block in the top level.
+            // The repositories here will be used for publishing your artifact, not for
+            // retrieving dependencies.
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Multi-version build matrix utilities (revised: use local variables instead of ext to avoid lookup issues)
+// ------------------------------------------------------------
+// 查询来源参考：
+//  - Minecraft 版本列表 JSON: https://piston-meta.mojang.com/mc/game/version_manifest.json
+//  - Fabric API: https://maven.fabricmc.net/net/fabricmc/fabric-api/fabric-api/
+//  - NeoForge:   https://maven.neoforged.net/releases/net/neoforged/neoforge/
+// 已根据你提供的数据完整填写 1.21 ~ 1.21.8 所有映射。
+// 若后续再加新补丁，只需追加一行。
+
+def versionMatrix = [
+        '1.21'  : [fabric_api: '0.102.0+1.21',    neoforge: '21.0.167',      architectury: '13.0.8'],
+        '1.21.1': [fabric_api: '0.116.6+1.21.1',  neoforge: '21.1.209',      architectury: '13.0.8'],
+        '1.21.2': [fabric_api: '0.106.1+1.21.2',  neoforge: '21.2.1-beta',   architectury: '14.0.4'],
+        '1.21.3': [fabric_api: '0.114.1+1.21.3',  neoforge: '21.3.93',       architectury: '14.0.4'],
+        '1.21.4': [fabric_api: '0.119.4+1.21.4',  neoforge: '21.4.154',      architectury: '15.0.3'],
+        '1.21.5': [fabric_api: '0.128.2+1.21.5',  neoforge: '21.5.95',       architectury: '16.1.4'],
+        '1.21.6': [fabric_api: '0.128.2+1.21.6',  neoforge: '21.6.20-beta',  architectury: '17.0.6'], // 当前默认版本 (gradle.properties)
+        '1.21.7': [fabric_api: '0.129.0+1.21.7',  neoforge: '21.7.25-beta',  architectury: '17.0.8'],
+        '1.21.8': [fabric_api: '0.134.0+1.21.8',  neoforge: '21.8.47',       architectury: '17.0.8']
+]
+
+def multiVersionOutputDir = file('multi-version-artifacts')
+
+// REWORK: replace embedded GradleBuild tasks with external gradlew Exec to avoid repeated included build conflict.
+
+def osWin = org.gradle.internal.os.OperatingSystem.current().isWindows()
+def gradlewCmd = osWin ? 'gradlew.bat' : './gradlew'
+
+// 清理旧的 buildFor_* (如有缓存) 不在此显式移除；重新注册新实现
+versionMatrix.each { mcVer, depMap ->
+    def safeName = mcVer.replace('.', '_')
+    tasks.register("buildFor_${safeName}") {
+        group = 'multi-version'
+        description = "(Exec) Build Fabric & NeoForge jars for Minecraft ${mcVer} (runtime jar only)"
+        outputs.dir file("${multiVersionOutputDir}/${mcVer}")
+        doLast {
+            logger.lifecycle("[multi-version] >>> 构建 ${mcVer} 开始")
+            exec {
+                workingDir rootProject.projectDir
+                commandLine gradlewCmd,
+                        'clean','build',
+                        "-Pminecraft_version=${mcVer}",
+                        "-Pfabric_api_version=${depMap.fabric_api}",
+                        "-Pneoforge_version=${depMap.neoforge}",
+                        "-Parchitectury_api_version=${depMap.architectury}",
+                        '--no-daemon'
+            }
+            def destBase = new File(multiVersionOutputDir, mcVer)
+            def fabricDest = new File(destBase, 'fabric')
+            def neoDest = new File(destBase, 'neoforge')
+            [fabricDest, neoDest].each { it.mkdirs() }
+            [fabricDest, neoDest].each { dir ->
+                if (dir.exists()) dir.listFiles()?.each { f -> if (f.name.endsWith('.jar')) f.delete() }
+            }
+            def verTag = "+mc${mcVer}"
+            def modVer = rootProject.mod_version
+            def renameFn = { String n ->
+                if (!n.endsWith('.jar')) return n
+                if (n.contains(verTag)) return n
+                if (n.contains(modVer)) return n.replace(modVer, modVer + verTag)
+                int dot = n.lastIndexOf('.jar')
+                return n.substring(0, dot) + verTag + '.jar'
+            }
+            copy {
+                from(file('fabric/build/libs'))
+                include('*.jar')
+                exclude('*-sources.jar','*-dev-shadow.jar')
+                into(fabricDest)
+                rename { renameFn(it) }
+            }
+            copy {
+                from(file('neoforge/build/libs'))
+                include('*.jar')
+                exclude('*-sources.jar','*-dev-shadow.jar')
+                into(neoDest)
+                rename { renameFn(it) }
+            }
+            logger.lifecycle("[multi-version] <<< 构建 ${mcVer} 完成 -> ${destBase}")
+        }
+    }
+}
+
+// 顺序依赖链：保证不会同时并行两个外部构建，避免资源互斥与清理冲突
+def orderedVersions = versionMatrix.keySet().toList()
+for (int i = 1; i < orderedVersions.size(); i++) {
+    def prev = orderedVersions[i - 1].replace('.', '_')
+    def cur  = orderedVersions[i].replace('.', '_')
+    tasks.named("buildFor_${cur}") { mustRunAfter("buildFor_${prev}") }
+}
+
+// 重新定义 buildAllSupported 指向所有任务（可能并行，不推荐）
+tasks.register('buildAllSupported') {
+    group = 'multi-version'
+    description = '(Exec variant, may parallel) Build all versions; NOT recommended if system is resource constrained.'
+    dependsOn versionMatrix.keySet().collect { "buildFor_${it.replace('.', '_')}" }
+}
+
+// 严格顺序 buildAll
+tasks.register('buildAll') {
+    group = 'multi-version'
+    description = '(Exec sequential) Build all Minecraft versions (1.21 -> 1.21.8) runtime jars only.'
+    dependsOn orderedVersions.collect { "buildFor_${it.replace('.', '_')}" }
+    doFirst { logger.lifecycle('[multi-version] 顺序构建开始: ' + orderedVersions.join(' -> ')) }
+    doLast { logger.lifecycle('[multi-version] 顺序构建完成，目录: ' + multiVersionOutputDir.absolutePath) }
+}
+
+tasks.register('checkVersionMatrixPlaceholders') {
+    group = 'multi-version'
+    description = 'Check for FILL_ME placeholders in versionMatrix.'
+    doLast {
+        // 现在已无占位逻辑；保留任务以防未来扩展
+        logger.lifecycle('[multi-version] 当前矩阵内没有占位项，全部为具体版本。')
+    }
+}

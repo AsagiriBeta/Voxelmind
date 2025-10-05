@@ -1,0 +1,38 @@
+modLoader = "javafml"
+loaderVersion = "[2,)"
+#issueTrackerURL = ""
+license = "GNU GPL 3.0"
+
+[[mods]]
+modId = "voxelmind"
+version = "${version}"
+displayName = "VoxelMind"
+authors = "AsagiriBeta"
+description = '''
+
+'''
+#logoFile = ""
+
+[[dependencies.voxelmind]]
+modId = "neoforge"
+type = "required"
+versionRange = "[21,)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.voxelmind]]
+modId = "minecraft"
+type = "required"
+versionRange = "[1.21.6,)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.voxelmind]]
+modId = "architectury"
+type = "required"
+versionRange = "[17.0.6,)"
+ordering = "AFTER"
+side = "BOTH"
+
+[[mixins]]
+config = "voxelmind.mixins.json"
