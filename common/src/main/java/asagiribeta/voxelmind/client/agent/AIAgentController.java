@@ -66,6 +66,8 @@ public final class AIAgentController {
     private long lastConversationChangeTick = -1; // last tick when user/other/ai appended (we key on user/other for decision gating)
     private long lastConversationUsedForDecisionTick = -1; // last convo change tick consumed by a decision
 
+    private boolean observeNeedsInitialDecision = false; // new flag
+
     public AIAgentController() { this.agent = createAgentFromConfig(); }
 
     private static AgentClient createAgentFromConfig() {
@@ -88,6 +90,11 @@ public final class AIAgentController {
             pathNavigator.cancel();
             activeTarget = null;
             cachedBlockPos = Optional.empty();
+        }
+        if (newMode == AgentMode.OBSERVE) {
+            // Mark that we should run at least one immediate decision even with empty conversation
+            observeNeedsInitialDecision = true;
+            try { Minecraft.getInstance().gui.getChat().addMessage(Component.literal("[VoxelMind] Observe mode enabled. Waiting for chat or interval.")); } catch (Exception ignored) {}
         }
     }
 
@@ -146,18 +153,28 @@ public final class AIAgentController {
 
     public void onClientTick(Minecraft mc) {
         if (mode == AgentMode.DISABLED) return; if (mc == null || mc.level == null || mc.player == null) return;
+        if (Config.get().debug()) {
+            int tc = tickCounter.get();
+            if (tc % 200 == 0) {
+                LOGGER.info("[VoxelMind] Tick heartbeat mode={} inFlight={} convoSize={} observeInitFlag={}", mode, inFlight, conversation.size(), observeNeedsInitialDecision);
+            }
+        }
+        // ...existing code before agent swap...
         AgentClient desired = createAgentFromConfig();
         if (!desired.getClass().equals(this.agent.getClass())) { this.agent = desired; mc.gui.getChat().addMessage(Component.literal("[VoxelMind] Agent switched to " + desired.getClass().getSimpleName())); }
         ActionSchema.Actions ready = pending.getAndSet(null); if (ready != null) applyActions(mc, ready);
         int interval = Config.get().decisionIntervalTicks();
         int t = tickCounter.incrementAndGet(); boolean runNow = (t % Math.max(1, interval)) == 0;
         if (mode == AgentMode.OBSERVE) {
-            // In pure observe, only trigger a decision if there is NEW human input since last decision
-            if (conversation.isEmpty() || lastConversationChangeTick <= lastConversationUsedForDecisionTick) runNow = false;
+            if (observeNeedsInitialDecision) { runNow = true; }
+            else {
+                // Only suppress when there is conversation but no new human input since last decision
+                if (!conversation.isEmpty() && lastConversationChangeTick <= lastConversationUsedForDecisionTick) runNow = false;
+            }
         }
         if (runNow && !inFlight) { inFlight = true; ScreenshotUtil.captureAsync(mc, png -> {
-            if (png == null) { inFlight = false; maybeSayOnce(mc, "Screenshot capture failed (null)"); return; }
-            if (mode == AgentMode.OBSERVE) lastConversationUsedForDecisionTick = lastConversationChangeTick; // consume the change
+            if (png == null) { inFlight = false; maybeSayOnce(mc, "Screenshot capture failed (null)"); observeNeedsInitialDecision = false; return; }
+            if (mode == AgentMode.OBSERVE) { lastConversationUsedForDecisionTick = lastConversationChangeTick; observeNeedsInitialDecision = false; }
             AgentClient.GameContext ctx = buildContext(mc); String ctxText = buildConversationContext(); Optional<String> convoOpt = ctxText.isBlank()? Optional.empty(): Optional.of(ctxText);
             exec.submit(() -> { try { var actions = agent.decide(png, ctx, convoOpt); if (actions != null) pending.set(actions);} catch (Throwable th){ maybeSayOnce(mc, "Agent request failed"); } finally { inFlight = false; }});
         }); }

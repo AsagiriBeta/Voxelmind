@@ -2,6 +2,7 @@ package asagiribeta.voxelmind.neoforge.client;
 
 import asagiribeta.voxelmind.client.ClientInit;
 import asagiribeta.voxelmind.client.agent.AIAgentController;
+import asagiribeta.voxelmind.client.util.ScreenshotUtil;
 import asagiribeta.voxelmind.config.Config;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.minecraft.client.Minecraft;
@@ -112,6 +113,15 @@ public final class VMNeoForgeClientCommands {
                     .then(Commands.literal("status").executes(ctx -> { Minecraft.getInstance().gui.getChat().addMessage(Component.literal("[VoxelMind] auto_reply_loose=" + Config.get().autoReplyLoose())); return 1; }))
                 )
             )
+            .then(Commands.literal("sstest").executes(ctx -> {
+                var mc = Minecraft.getInstance();
+                ScreenshotUtil.captureAsync(mc, data -> mc.execute(() -> mc.gui.getChat().addMessage(Component.literal("[VoxelMind] sstest bytes=" + (data==null?"null":data.length)))));
+                return 1;
+            }))
+            .then(Commands.literal("ssinfo").executes(ctx -> {
+                Minecraft.getInstance().gui.getChat().addMessage(Component.literal("[VoxelMind] SS " + ScreenshotUtil.debugInfo()));
+                return 1;
+            }))
         );
     }
 }

@@ -38,7 +38,11 @@ Quick start
 ./gradlew :neoforge:runClient
 ```
 
-Multi-version build matrix (produces jars under `multi-version-artifacts/<mcVersion>/{fabric,neoforge}`)
+Multi-version build matrix (flat output layout)
+- Output jars now accumulate under two fixed folders:
+  - `multi-version-artifacts/fabric/`
+  - `multi-version-artifacts/neoforge/`
+  Each jar name carries a `+mc<version>` suffix (e.g. `VoxelMind-fabric-1.0.0+mc1.21.5.jar`).
 - Sequential build ALL supported versions (1.21 → 1.21.8):
 
 ```zsh
@@ -54,8 +58,9 @@ Multi-version build matrix (produces jars under `multi-version-artifacts/<mcVers
   Other tasks follow the pattern: `buildFor_1_21`, `buildFor_1_21_1`, ..., `buildFor_1_21_8`.
 
 Notes on multi-version tasks:
-- Each `buildFor_*` invokes a clean isolated build with the correct dependency versions.
-- Output runtime jars (sources/dev jars excluded) are copied & renamed with a `+mc<version>` suffix if not already present.
+- Each `buildFor_*` performs a clean build with version-specific dependency set.
+- Only jars for the target version tag are replaced (older/newer versions remain side-by-side).
+- Fabric `fabric.mod.json` & NeoForge `neoforge.mods.toml` dependency ranges are dynamically expanded per version to avoid incompatibility errors.
 
 In-game
 - Press P repeatedly to cycle AI Mode: DISABLED -> OBSERVE -> CONTROL. Chat displays: `[VoxelMind] AI Mode: <MODE>`.

@@ -2,6 +2,7 @@ package asagiribeta.voxelmind.fabric.client;
 
 import asagiribeta.voxelmind.client.ClientInit;
 import asagiribeta.voxelmind.client.agent.AIAgentController;
+import asagiribeta.voxelmind.client.util.ScreenshotUtil;
 import asagiribeta.voxelmind.config.Config;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
@@ -63,7 +64,13 @@ public final class VMFabricClientCommands {
                         boolean dbg = Config.get().debug();
                         boolean ansOnly = Config.get().observeAnswerOnly();
                         boolean loose = Config.get().autoReplyLoose();
-                        Minecraft.getInstance().gui.getChat().addMessage(Component.literal("[VoxelMind] Mode=" + mode + ", Debug=" + dbg + ", AnswerOnly=" + ansOnly + ", LooseReply=" + loose));
+                        String agentType = ctrl.getClass().getClassLoader()!=null? ctrl.getClass().getName():"?"; // placeholder replaced below
+                        // Replace agentType with actual internal agent class via reflection
+                        String realAgent;
+                        try {
+                            var f = ctrl.getClass().getDeclaredField("agent"); f.setAccessible(true); Object a = f.get(ctrl); realAgent = a==null?"null":a.getClass().getSimpleName();
+                        } catch (Throwable t) { realAgent = "?"; }
+                        Minecraft.getInstance().gui.getChat().addMessage(Component.literal("[VoxelMind] Mode=" + mode + ", Agent=" + realAgent + ", Debug=" + dbg + ", AnswerOnly=" + ansOnly + ", LooseReply=" + loose));
                         return 1;
                     }))
                     .then(ClientCommandManager.literal("debug")
@@ -114,6 +121,17 @@ public final class VMFabricClientCommands {
                             .then(ClientCommandManager.literal("status").executes(ctx -> { Minecraft.getInstance().gui.getChat().addMessage(Component.literal("[VoxelMind] auto_reply_loose=" + Config.get().autoReplyLoose())); return 1; }))
                         )
                     )
+                    .then(ClientCommandManager.literal("sstest").executes(ctx -> {
+                        var mc = Minecraft.getInstance();
+                        ScreenshotUtil.captureAsync(mc, data -> {
+                            mc.execute(() -> mc.gui.getChat().addMessage(Component.literal("[VoxelMind] sstest bytes=" + (data==null?"null": data.length))));
+                        });
+                        return 1;
+                    }))
+                    .then(ClientCommandManager.literal("ssinfo").executes(ctx -> {
+                        Minecraft.getInstance().gui.getChat().addMessage(Component.literal("[VoxelMind] SS " + ScreenshotUtil.debugInfo()));
+                        return 1;
+                    }))
             );
         });
     }

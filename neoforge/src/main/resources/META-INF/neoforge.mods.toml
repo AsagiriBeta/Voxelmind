@@ -23,14 +23,14 @@ side = "BOTH"
 [[dependencies.voxelmind]]
 modId = "minecraft"
 type = "required"
-versionRange = "[1.21.6,)"
+versionRange = "[${minecraft_version},)"
 ordering = "NONE"
 side = "BOTH"
 
 [[dependencies.voxelmind]]
 modId = "architectury"
 type = "required"
-versionRange = "[17.0.6,)"
+versionRange = "[${architectury_api_version},)"
 ordering = "AFTER"
 side = "BOTH"
 

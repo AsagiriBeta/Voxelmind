@@ -104,9 +104,12 @@ versionMatrix.each { mcVer, depMap ->
     tasks.register("buildFor_${safeName}") {
         group = 'multi-version'
         description = "(Exec) Build Fabric & NeoForge jars for Minecraft ${mcVer} (runtime jar only)"
-        outputs.dir file("${multiVersionOutputDir}/${mcVer}")
+        outputs.dir file("${multiVersionOutputDir}/fabric")
+        outputs.dir file("${multiVersionOutputDir}/neoforge")
+        // Always run to ensure latest classes included
+        outputs.upToDateWhen { false }
         doLast {
-            logger.lifecycle("[multi-version] >>> 构建 ${mcVer} 开始")
+            logger.lifecycle("[multi-version] >>> 构建 ${mcVer} 开始 (flat layout)")
             exec {
                 workingDir rootProject.projectDir
                 commandLine gradlewCmd,
@@ -117,13 +120,9 @@ versionMatrix.each { mcVer, depMap ->
                         "-Parchitectury_api_version=${depMap.architectury}",
                         '--no-daemon'
             }
-            def destBase = new File(multiVersionOutputDir, mcVer)
-            def fabricDest = new File(destBase, 'fabric')
-            def neoDest = new File(destBase, 'neoforge')
+            def fabricDest = new File(multiVersionOutputDir, 'fabric')
+            def neoDest = new File(multiVersionOutputDir, 'neoforge')
             [fabricDest, neoDest].each { it.mkdirs() }
-            [fabricDest, neoDest].each { dir ->
-                if (dir.exists()) dir.listFiles()?.each { f -> if (f.name.endsWith('.jar')) f.delete() }
-            }
             def verTag = "+mc${mcVer}"
             def modVer = rootProject.mod_version
             def renameFn = { String n ->
@@ -133,6 +132,12 @@ versionMatrix.each { mcVer, depMap ->
                 int dot = n.lastIndexOf('.jar')
                 return n.substring(0, dot) + verTag + '.jar'
             }
+            def pruneVersionJars = { File dir ->
+                if (!dir.exists()) return
+                dir.listFiles()?.each { f -> if (f.name.endsWith('.jar') && f.name.contains(verTag)) { f.delete() } }
+            }
+            pruneVersionJars(fabricDest)
+            pruneVersionJars(neoDest)
             copy {
                 from(file('fabric/build/libs'))
                 include('*.jar')
@@ -147,7 +152,7 @@ versionMatrix.each { mcVer, depMap ->
                 into(neoDest)
                 rename { renameFn(it) }
             }
-            logger.lifecycle("[multi-version] <<< 构建 ${mcVer} 完成 -> ${destBase}")
+            logger.lifecycle("[multi-version] <<< 构建 ${mcVer} 完成 -> ${multiVersionOutputDir}/(fabric|neoforge), 版本标记: ${verTag}")
         }
     }
 }
@@ -184,3 +189,5 @@ tasks.register('checkVersionMatrixPlaceholders') {
         logger.lifecycle('[multi-version] 当前矩阵内没有占位项，全部为具体版本。')
     }
 }
+
+println "[DEBUG root] minecraft_version=${project.minecraft_version} architectury_api_version=${project.architectury_api_version}"
