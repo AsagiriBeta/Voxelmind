@@ -14,7 +14,13 @@ What’s implemented
 - Fabric and NeoForge wiring through Architectury EnvExecutor
 
 Quick start
-- Build all: 
+- Build (default Minecraft version 1.21.6 from `gradle.properties`):
+
+```zsh
+./gradlew build
+```
+
+  (Skip tests if needed — none yet):
 
 ```zsh
 ./gradlew build -x test
@@ -32,6 +38,25 @@ Quick start
 ./gradlew :neoforge:runClient
 ```
 
+Multi-version build matrix (produces jars under `multi-version-artifacts/<mcVersion>/{fabric,neoforge}`)
+- Sequential build ALL supported versions (1.21 → 1.21.8):
+
+```zsh
+./gradlew buildAll
+```
+
+- Single specific version (example 1.21.6):
+
+```zsh
+./gradlew buildFor_1_21_6
+```
+
+  Other tasks follow the pattern: `buildFor_1_21`, `buildFor_1_21_1`, ..., `buildFor_1_21_8`.
+
+Notes on multi-version tasks:
+- Each `buildFor_*` invokes a clean isolated build with the correct dependency versions.
+- Output runtime jars (sources/dev jars excluded) are copied & renamed with a `+mc<version>` suffix if not already present.
+
 In-game
 - Press P repeatedly to cycle AI Mode: DISABLED -> OBSERVE -> CONTROL. Chat displays: `[VoxelMind] AI Mode: <MODE>`.
   - DISABLED: Agent loop off, no screenshots, no control.
@@ -40,16 +65,32 @@ In-game
 - Press O to reload `voxelmind.json` at runtime.
 - With the stub agent, you’ll see periodic `[AI] StubAgent tick ...` messages in OBSERVE or CONTROL mode.
 
-Commands (excerpt)
-- `/vm enable` – switch to CONTROL mode.
-- `/vm observe` – switch to OBSERVE (passive) mode.
-- `/vm disable` – switch to DISABLED.
-- `/vm status` – shows current Mode, Goal, and (on Fabric) Debug.
-- `/vm goal <text>` – set user goal and automatically enters CONTROL mode.
-- `/vm clear` – clear user goal.
-- `/vm now` – force an immediate decision (ignored if DISABLED).
-- `/vm lockradius get|set <value>` – manage target lock radius (1–128).
-- Debug subcommands unchanged: `/vm debug on|off|status`.
+Commands (current)
+- Core mode & status:
+  - `/vm enable` → CONTROL mode
+  - `/vm observe` → OBSERVE mode
+  - `/vm disable` → DISABLED
+  - `/vm status` → show mode + debug flags
+  - `/vm now` → force an immediate decision (no-op if DISABLED)
+- Interaction with AI:
+  - `/vm say <text>` → send a user message to the AI & trigger a decision
+- Conversation buffer:
+  - `/vm conv show [lines]` → show last N (default 20) conversation lines
+  - `/vm conv clear` → clear stored conversation context
+  - `/vm conv limit get|set <n>` → view or change max stored lines (4–200)
+- Targeting:
+  - `/vm lockradius get|set <value>` (1–128) → radius for target auto-lock logic
+- Debug:
+  - `/vm debug on|off|status`
+- Chat behavior tuning (`/vm chat ...`):
+  - `dedup get|set <ticks>` → duplicate suppression window (20–20000)
+  - `mininterval get|set <ticks>` → minimum ticks between AI chat (0–2000)
+  - `autoreply on|off|status` → auto-reply toggle in observe modes
+  - `answeronly on|off|status` → only respond when explicitly addressed
+  - `loosereply on|off|status` → relaxed matching for being addressed
+
+Deprecated / removed
+- `/vm goal <text>` and `/vm clear` have been removed (previous goal system replaced by direct conversation context + user prompts).
 
 Configuration (OpenAI-compatible only)
 - A JSON config file is created on first run at: `config/voxelmind.json` (per Minecraft instance)
@@ -68,25 +109,13 @@ Configuration (OpenAI-compatible only)
   - `show_ai_prefix`: Prepend `[AI] ` to messages.
   - `debug`: Extra logging.
 
-Examples
-- OpenAI:
+Examples (OpenAI)
 
 ```json
 {
-  "agent_url": "https://api.openai.com/v1/chat/completions",
-  "api_key": "sk-***",
+  "agent_url": "",
+  "api_key": "",
   "model": "gpt-4o-mini",
-  "decision_interval_ticks": 5
-}
-```
-
-- Qwen (DashScope compatible endpoint):
-
-```json
-{
-  "agent_url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-  "api_key": "sk-***",
-  "model": "qwen-vl-plus",
   "decision_interval_ticks": 5
 }
 ```
