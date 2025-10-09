@@ -1,172 +1,109 @@
 # VoxelMind
 
-An Architectury-based mod (Fabric + NeoForge) that connects a multimodal AI agent to Minecraft. The agent consumes live screenshots and returns structured actions to control (or just observe) the player.
+A cross-loader (Fabric + NeoForge via Architectury) client mod that connects a multimodal AI agent to Minecraft. It streams periodic screenshots to an OpenAI‑compatible endpoint and applies the returned structured JSON actions.
 
-Status: initial scaffold with a stub agent and full client wiring.
+Status (Oct 2025)
+- Core observe loop stable.
+- CONTROL (autonomous takeover) is **experimental / incomplete**: movement + basic navigation + mouse actions work, but reliability, richer pathfinding, advanced targeting, safety limits, and action smoothing are still WIP.
+- Use at your own risk; keep a finger on the keybind to switch back to DISABLED.
 
-What’s implemented
-- Three AI modes: DISABLED (off), OBSERVE (screenshots + model decisions + chat only, no player control), CONTROL (full autonomous control + chat)
-- Common action schema: chat (public/self), navigation, mouse left/right (tap/hold/release) plus target locking (camera view auto-managed)
-- Screenshot capture (async GPU readback) -> PNG bytes
-- Agent controller loop (≈4 Hz default, configurable) capturing screenshots & calling the agent in OBSERVE or CONTROL mode
-- Keybind: P cycles modes (DISABLED -> OBSERVE -> CONTROL -> ...), O reloads config
-- Chat to self via client-only messages; chat to all via normal chat send
-- Fabric and NeoForge wiring through Architectury EnvExecutor
+TL;DR Features (current)
+- AI Modes: DISABLED / OBSERVE / CONTROL (experimental)
+- Structured action schema: chat, navigation (relative offsets), mouse (tap/hold/release), target hints (auto camera lock), basic path BFS
+- Periodic screenshot capture (PNG) + world context → OpenAI compatible `chat/completions`
+- Keybinds: P cycle modes, O reload config
+- Simple conversation memory & chat rate limiting / dedupe
+- Multi‑version build tasks producing matrix jars (1.21 → 1.21.8)
 
-Quick start
-- Build (default Minecraft version 1.21.6 from `gradle.properties`):
-
+Quick Start
 ```zsh
-./gradlew build
-```
-
-  (Skip tests if needed — none yet):
-
-```zsh
-./gradlew build -x test
-```
-
-- Run Fabric dev client:
-
-```zsh
+./gradlew build          # Build default version (see gradle.properties)
 ./gradlew :fabric:runClient
-```
-
-- Run NeoForge dev client:
-
-```zsh
+# or
 ./gradlew :neoforge:runClient
 ```
-
-Multi-version build matrix (flat output layout)
-- Output jars now accumulate under two fixed folders:
-  - `multi-version-artifacts/fabric/`
-  - `multi-version-artifacts/neoforge/`
-  Each jar name carries a `+mc<version>` suffix (e.g. `VoxelMind-fabric-1.0.0+mc1.21.5.jar`).
-- Sequential build ALL supported versions (1.21 → 1.21.8):
-
+Multi‑version jars:
 ```zsh
-./gradlew buildAll
+./gradlew buildAll          # All supported 1.21.x
+./gradlew buildFor_1_21_6   # Single version pattern: buildFor_<underscored_version>
 ```
+Artifacts land under:
+- `multi-version-artifacts/fabric/`
+- `multi-version-artifacts/neoforge/`
 
-- Single specific version (example 1.21.6):
+Modes
+- DISABLED: loop off (no screenshots / API calls)
+- OBSERVE: agent runs, parses actions, only chat is applied (no player control)
+- CONTROL (experimental): attempts full control (movement, navigation, mouse, auto target lock)
 
-```zsh
-./gradlew buildFor_1_21_6
-```
+Keybind Flow
+Press P repeatedly: DISABLED → OBSERVE → CONTROL → …  (chat feedback: `[VoxelMind] AI Mode: <MODE>`)
+Press O: reload `voxelmind.json`.
 
-  Other tasks follow the pattern: `buildFor_1_21`, `buildFor_1_21_1`, ..., `buildFor_1_21_8`.
+Selected Commands
+- `/vm enable|observe|disable|status|now`
+- `/vm say <text>` – inject a user message & trigger a decision
+- Conversation: `/vm conv show|clear|limit get|set <n>`
+- Targeting radius: `/vm lockradius get|set <r>`
+- Debug toggle: `/vm debug on|off|status`
+- Chat tuning (`/vm chat ...`): `dedup`, `mininterval`, `autoreply`, `answeronly`, `loosereply`
 
-Notes on multi-version tasks:
-- Each `buildFor_*` performs a clean build with version-specific dependency set.
-- Only jars for the target version tag are replaced (older/newer versions remain side-by-side).
-- Fabric `fabric.mod.json` & NeoForge `neoforge.mods.toml` dependency ranges are dynamically expanded per version to avoid incompatibility errors.
-
-In-game
-- Press P repeatedly to cycle AI Mode: DISABLED -> OBSERVE -> CONTROL. Chat displays: `[VoxelMind] AI Mode: <MODE>`.
-  - DISABLED: Agent loop off, no screenshots, no control.
-  - OBSERVE: Agent loop on (screenshots + decisions) and can send chat, but DOES NOT move/aim/click.
-  - CONTROL: Full autonomous control (movement, aiming, path navigation, mouse actions, chat).
-- Press O to reload `voxelmind.json` at runtime.
-- With the stub agent, you’ll see periodic `[AI] StubAgent tick ...` messages in OBSERVE or CONTROL mode.
-
-Commands (current)
-- Core mode & status:
-  - `/vm enable` → CONTROL mode
-  - `/vm observe` → OBSERVE mode
-  - `/vm disable` → DISABLED
-  - `/vm status` → show mode + debug flags
-  - `/vm now` → force an immediate decision (no-op if DISABLED)
-- Interaction with AI:
-  - `/vm say <text>` → send a user message to the AI & trigger a decision
-- Conversation buffer:
-  - `/vm conv show [lines]` → show last N (default 20) conversation lines
-  - `/vm conv clear` → clear stored conversation context
-  - `/vm conv limit get|set <n>` → view or change max stored lines (4–200)
-- Targeting:
-  - `/vm lockradius get|set <value>` (1–128) → radius for target auto-lock logic
-- Debug:
-  - `/vm debug on|off|status`
-- Chat behavior tuning (`/vm chat ...`):
-  - `dedup get|set <ticks>` → duplicate suppression window (20–20000)
-  - `mininterval get|set <ticks>` → minimum ticks between AI chat (0–2000)
-  - `autoreply on|off|status` → auto-reply toggle in observe modes
-  - `answeronly on|off|status` → only respond when explicitly addressed
-  - `loosereply on|off|status` → relaxed matching for being addressed
-
-Deprecated / removed
-- `/vm goal <text>` and `/vm clear` have been removed (previous goal system replaced by direct conversation context + user prompts).
-
-Configuration (OpenAI-compatible only)
-- A JSON config file is created on first run at: `config/voxelmind.json` (per Minecraft instance)
-  - In dev runs this typically resolves to:
-    - Fabric: `fabric/run/config/voxelmind.json`
-    - NeoForge: `neoforge/run/config/voxelmind.json`
-- Fields:
-  - `agent_url`: Your OpenAI-compatible chat.completions endpoint
-  - `api_key`: Bearer token; sent as `Authorization: Bearer <api_key>`
-  - `model`: Model name (e.g., `gpt-4o-mini`, `gpt-4o`, `qwen-vl-plus`)
-  - `decision_interval_ticks`: How often the agent runs (ticks). Default 5 (≈4 Hz). Applies in OBSERVE & CONTROL.
-  - `target_lock_radius`: Search radius (blocks) for auto target locking (CONTROL only).
-  - `assist_only_primary_when_aiming`: If true, only permit primary action when crosshair on target/log within reach (CONTROL only).
-  - `assist_primary_reach_distance`: Max distance (blocks) for the above rule.
-  - `allow_public_chat`: If true, AI chat messages go to public chat; otherwise client-only.
-  - `show_ai_prefix`: Prepend `[AI] ` to messages.
-  - `debug`: Extra logging.
-
-Examples (OpenAI)
-
+Configuration (created on first run)
+File: `config/voxelmind.json` (dev paths: `fabric/run/...` or `neoforge/run/...`)
+Essential fields:
 ```json
 {
-  "agent_url": "",
+  "agent_url": "https://your-endpoint/v1/chat/completions",
   "api_key": "",
   "model": "gpt-4o-mini",
   "decision_interval_ticks": 5
 }
 ```
+Other notable fields: `target_lock_radius`, `assist_only_primary_when_aiming`, `assist_primary_reach_distance`, `allow_public_chat`, `show_ai_prefix`, `debug`.
 
-How it talks to your model
-- The HTTP agent uses an OpenAI-compatible `chat/completions` call:
-  - `messages` include a `system` instruction enforcing JSON-only output
-  - The `user` message contains world context + base64 PNG screenshot (image_url)
-  - `response_format: {"type":"json_object"}`, `temperature: 0`
-- Assistant’s single JSON object: `chat`, `navigation`, `mouse`, `target` keys.
+How Requests Work (brief)
+- System prompt enforces single JSON object output (temperature 0, `response_format: json_object`).
+- User message includes: minimal world context + base64 screenshot (image_url) + recent chat buffer.
+- Expected assistant JSON keys (any optional): `chat`, `navigation`, `mouse`, `target`.
 
-Action schema (model output)
-- Chat: `{"chat": {"toAll": "hello", "toSelf": "debug info"}}`
-- Navigation (3D): `{"navigation": {"dx": 5, "dy": 1, "dz": -3}}`
-- Mouse: `{"mouse": {"left": "HOLD", "right": "TAP"}}`
-- Target (one strategy): coordinate / block id / block tag / entity type / entity name substring
-- Camera: model no longer outputs view; mod auto-locks onto target (CONTROL only)
+Action Schema Snapshot
+```json
+{
+  "chat": {"toAll": "hi", "toSelf": "debug info"},
+  "navigation": {"dx": 3, "dy": 0, "dz": -2},
+  "mouse": {"left": "HOLD", "right": "TAP"},
+  "target": {"entity": "zombie"}
+}
+```
+(Fields omitted = no change.) OBSERVE ignores control fields; CONTROL applies them.
 
-Modes & control application
-- OBSERVE: navigation / target / mouse outputs are parsed but ignored for player control (only chat processed).
-- CONTROL: full application (movement, path navigation, target lock, mouse actions, conditional primary assist logic).
-- DISABLED: loop inactive (no screenshots, no API calls).
+Current Limitations / Caveats
+- CONTROL pathfinding: simple BFS, shallow vertical handling only.
+- No global safety / cooldown budget yet (model could spam actions within interval granularity).
+- Target lock heuristic radius; may pick unintended entities/blocks.
+- No server‑side authoritative checks (client only).
+- Full camera trajectory smoothing & multi-step tool use not implemented.
 
-Key files
-- `AIAgentController`: handles tri-state mode & loop
-- `ActionSchema`: structured action types
-- `HttpAgentClient`: HTTP + prompt & parsing
-- `PathNavigator`: BFS + step generation
+Roadmap (short)
+- Harden CONTROL (safety caps, smoother motion, better targeting)
+- Richer navigation (stairs, ladders, fluids, multi-layer elevation)
+- Tool / inventory awareness & action sequencing
+- Optional headless inference throttling / cost metrics
+- More model backends & local adapter hook
 
-Notes
-- Adjust `decision_interval_ticks` for responsiveness vs. cost.
-- New navigation request cancels previous path.
-- `target_lock_radius` affects search during CONTROL only.
-- Primary action assist gating only active in CONTROL.
+Tips
+- Increase `decision_interval_ticks` if you hit rate or cost limits.
+- Keep debug on while tuning prompts; turn off for normal play.
+- If CONTROL misbehaves: press P to exit, or edit config and reload (O).
 
-Navigation & pathfinding
-- BFS with limited vertical support (single-block ascents/descents). Larger elevation changes are future work.
-
-Localization
-- Keybind strings under `assets/voxelmind/lang/en_us.json` and `zh_cn.json`.
+Key Source Files
+- `AIAgentController` – mode loop
+- `HttpAgentClient` – request / response handling
+- `ActionSchema` – action model
+- `PathNavigator` – basic BFS path steps
 
 License
-- GPL-3.0
+GPL-3.0
 
-Debug Logging
-When `debug` is true:
-- `[VoxelMind][AI raw]` truncated original model JSON (first ~1000 chars)
-- `[VoxelMind][AI parsed]` normalized parsed summary
-Disable in production to reduce noise.
+Credits / Disclaimer
+This is an experimental research mod. Expect breaking changes and rough edges while CONTROL matures.
